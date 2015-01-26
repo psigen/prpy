@@ -195,7 +195,7 @@ class Sequence(MetaPlanner):
                                  str(planner), method)
             except MetaPlanningError as e:
                 errors[planner] = e
-            except Exception as e:
+            except PlanningError as e:
                 logger.warning('Planning with %s failed: %s', planner, e)
                 errors[planner] = e
 
@@ -230,7 +230,7 @@ class Ranked(MetaPlanner):
                     results[index] = planning_method(*args, **kw_args)
                 except MetaPlanningError as e:
                     results[index] = e
-                except Exception as e:
+                except PlanningError as e:
                     logger.warning('Planning with %s failed: %s', planner, e)
                     results[index] = e
 
