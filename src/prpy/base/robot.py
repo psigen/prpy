@@ -28,7 +28,7 @@
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-import functools, logging, openravepy, numpy
+import functools, logging, openravepy, numpy, trollius
 from .. import bind, named_config, planning, util
 from prpy.clone import Clone, Cloned
 from prpy.tsr.tsrlibrary import TSRLibrary
@@ -278,16 +278,15 @@ class Robot(openravepy.Robot):
 
         return False
 
+    @trollius.coroutine
     def _PlanWrapper(self, planning_method, args, kw_args):
+        from trollius import From, Return
+
         # Call the planner.
-        traj = planning_method(self, *args, **kw_args)
+        traj = yield From(planning_method(self, *args, **kw_args))
 
         # Strip inactive DOFs from the trajectory.
         config_spec = self.GetActiveConfigurationSpecification()
         openravepy.planningutils.ConvertTrajectorySpecification(traj, config_spec)
 
-        # Optionally execute the trajectory.
-        if 'execute' not in kw_args or kw_args['execute']:
-            return self.ExecuteTrajectory(traj, **kw_args)
-        else:
-            return traj
+        raise Return(traj)

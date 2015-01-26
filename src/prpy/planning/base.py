@@ -28,7 +28,7 @@
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-import abc, logging, functools, openravepy
+import abc, logging, functools, openravepy, trollius
 import time
 from .. import ik_ranking
 from ..clone import Clone, Cloned
@@ -53,14 +53,28 @@ class PlanningMethod(object):
         self.func = func
 
     def __call__(self, instance, robot, *args, **kw_args):
-        env = robot.GetEnv()
 
-        with Clone(env, clone_env=instance.env, lock=True):
-            planning_traj = self.func(instance, Cloned(robot), *args, **kw_args)
-            traj = openravepy.RaveCreateTrajectory(env, planning_traj.GetXMLId())
-            traj.Clone(planning_traj, 0)
+        def defer_plan(instance, robot, args, kw_args):
+            env = robot.GetEnv()
 
-        return traj 
+            with Clone(env, clone_env=instance.env, lock=True):
+                print '>>> calling planner:'
+                print 'self.func =', self.func
+                planning_traj = self.func(instance, Cloned(robot), *args, **kw_args)
+                print '>>> creating trajectory'
+                print 'planning_traj =', planning_traj
+                traj = openravepy.RaveCreateTrajectory(env, planning_traj.GetXMLId())
+                print '>>> cloning trajectory'
+                traj.Clone(planning_traj, 0)
+
+            return traj
+
+        executor = trollius.executor.get_default_executor()
+        future_plan = trollius.get_event_loop().run_in_executor(
+            executor, defer_plan, instance, robot, args, kw_args
+        )
+        print 'PlanningMethod.future_plan =', future_plan
+        return future_plan
 
     def __get__(self, instance, instancetype):
         # Bind the self reference and use update_wrapper to propagate the
@@ -181,7 +195,10 @@ class Sequence(MetaPlanner):
     def get_planners(self, method_name):
         return [ planner for planner in self._planners if hasattr(planner, method_name) ]
 
+    @trollius.coroutine 
     def plan(self, method, args, kw_args):
+        from trollius import From, Return
+
         errors = dict()
 
         for planner in self._planners:
@@ -189,7 +206,12 @@ class Sequence(MetaPlanner):
                 if hasattr(planner, method):
                     logger.debug('Sequence - Calling planner "%s".', str(planner))
                     planner_method = getattr(planner, method)
-                    return planner_method(*args, **kw_args)
+
+                    plan_future = planner_method(*args, **kw_args)
+                    print 'Sequence.plan_future =', plan_future
+                    traj = yield From(plan_future)
+                    print 'Sequence.traj =', traj
+                    raise Return(traj)
                 else:
                     logger.debug('Sequence - Skipping planner "%s"; does not have "%s" method.',
                                  str(planner), method)
