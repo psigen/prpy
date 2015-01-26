@@ -37,7 +37,7 @@ class Clone(object):
     local = threading.local()
 
     def __init__(self, parent_env, clone_env=None, destroy_on_exit=None,
-                 options=openravepy.CloningOptions.Bodies):
+                 lock=False, unlock=None, options=openravepy.CloningOptions.Bodies):
         """
         Context manager that clones the parent environment.
 
@@ -46,9 +46,19 @@ class Clone(object):
         parent_env. If clone_env is dynamically created, it will be destroyed
         on exit by default unless the destroy_on_exit argument is false.
 
+        Both env and clone_env are always locked during cloning. If lock is
+        True, then clone_env remains locked inside the with-statement block it
+        is manually unlocked with clone_env.Unlock(). By default, the cloned
+        environment is unlocked when leaving the with-block. This can be
+        overridden by setting unlock=False (note that unlock=False MUST be
+        passed if cloned_env.Unlock() is manually called inside the
+        with-statement).
+
         @param parent_env environment to clone
         @param clone_env environment to clone into (optional)
         @param destroy_on_exit whether to destroy the clone on __exit__
+        @param lock lock the cloned environment in the with-block
+        @param unlock unlock the environment when exiting the with-block 
         @param options bitmask of CloningOptions
         """
 
@@ -56,6 +66,9 @@ class Clone(object):
 
         self.clone_parent = parent_env
         self.options = options
+
+        self.lock = lock
+        self.unlock = unlock if unlock is not None else lock
 
         if clone_env is not None:
             self.clone_env = clone_env
@@ -79,9 +92,15 @@ class Clone(object):
             setattr(self.clone_env, 'clone_parent', self.clone_parent)
 
     def __enter__(self):
+        if self.lock:
+            self.clone_env.Lock()
+
         return self.clone_env
 
     def __exit__(self, *args):
+        if self.unlock:
+            self.clone_env.Unlock()
+
         if self.destroy_on_exit:
             self.Destroy()
         else:
